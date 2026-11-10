@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 
-MODE=$1
-SERVICE=$2
-ENV_FILE="../../ed-node/.env-connectorcp"
+MODE=${1:-}
+SERVICE=${2:-}
+COMPOSE_EXTRA_ARGS=("${@:3}")
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$SCRIPT_DIR/../../ed-node/.env-connectorcp"
 
-echo "deploy.sh: deploy $1 $2"
-echo ".. action (up, down, ...): $1"
-echo ".. service (central-platform-federated-catalog, ...): $2"
+cd "$SCRIPT_DIR" || exit 1
+
+echo "deploy.sh: deploy ${MODE:-<missing action>} ${SERVICE:-<all services>}"
+echo ".. action: ${MODE:-<missing>}"
+echo ".. service: ${SERVICE:-<all services>}"
 echo ".. env-file: $ENV_FILE"
 
-if [ ! -f "$ENV_FILE" ]; then
+if [[ ! -f "$ENV_FILE" ]]; then
   echo "Error: The file $ENV_FILE does not exist."
   exit 1
 fi
@@ -23,4 +28,28 @@ echo "deploy.sh: invoke docker compose $1 $2"
 echo ".. CONNECTOR_HOST ${CONNECTOR_HOST}"
 echo ".. INSTANCE_NAME ${ED_NODE_INSTANCE_NAME}"
 echo
-docker compose --project-name "${ED_NODE_INSTANCE_NAME}" $1 $2
+
+if [[ "$MODE" == "up" && "$SERVICE" == "central-platform-federated-catalog" ]] &&
+  ! docker image inspect standalone-federated-catalog:latest >/dev/null 2>&1; then
+  echo "deploy.sh: local standalone-federated-catalog image not found; building it"
+  if ! (
+    cd "$PROJECT_ROOT" &&
+      ./gradlew -Ppersistence=true :launchers:standalone-federated-catalog:build &&
+      docker build \
+        --build-arg JAR=build/libs/standalone-federated-catalog.jar \
+        --file launchers/standalone-federated-catalog/src/main/docker/Dockerfile \
+        --tag standalone-federated-catalog:latest \
+        launchers/standalone-federated-catalog
+  ); then
+    echo "Error: Failed to build standalone-federated-catalog image."
+    exit 1
+  fi
+fi
+
+COMPOSE_ARGS=("$MODE")
+if [[ -n "$SERVICE" ]]; then
+  COMPOSE_ARGS+=("$SERVICE")
+fi
+COMPOSE_ARGS+=("${COMPOSE_EXTRA_ARGS[@]}")
+
+docker compose --project-name "${ED_NODE_INSTANCE_NAME}" "${COMPOSE_ARGS[@]}"

@@ -4,6 +4,7 @@ This is a repository to be used for the deployment of the central knowledge grap
 
 It provides the following components and artifacts
 - an openapi service to access the triple store 
+- an authenticated Infraflex telemetry ingestion endpoint that stores timestamped measurements in the MSC knowledge graph
 - a docker compose, defining all the services specific to the central platform (next to the ed-node services):
   - a triple store: graphdb
   - a postgres intance, used by
@@ -42,8 +43,9 @@ Make sure
 
 - settings
   - [standalone-catalog.env](./env/standalone-catalog.env)
-    - note the vault token `edc.vault.hashicorp.token`
-    - to be retrieved from `\vault-token\token` on connectorcp connector file system.
+    - The Docker runtime reads the current connectorcp Vault token from the
+      read-only `/vault-token/token` volume. It overrides any token in the
+      configuration file; do not copy generated tokens into source-controlled files.
 
 ## Run
 
@@ -86,13 +88,50 @@ See [README](./graphdb/README.md).
 
 ### Federated Catalog
 
+When starting the federated catalog, `deploy.sh` builds its Gradle artifact with persistence/Vault support and creates the local Docker image if that image is not already available. This requires Docker and the repository's Gradle wrapper dependencies.
+
 ```sh
 # start the federated catalog
-./deploy.sh up central-platform-federated-catalog | tee log/central-platform-federated-catalog-run10.log
+mkdir -p log
+./deploy.sh up central-platform-federated-catalog --detach
+
+# inspect catalog logs
+docker logs --tail=100 central-platform-federated-catalog
 
 # stop the federated catalog
-./deploy.sh restart central-platform-federated-catalog
+./deploy.sh stop central-platform-federated-catalog
 ```
+
+After changing the catalog Dockerfile or entrypoint, rebuild the image from the
+repository root and recreate only the catalog container:
+
+```sh
+./gradlew -Ppersistence=true :launchers:standalone-federated-catalog:build
+docker build \
+  --build-arg JAR=build/libs/standalone-federated-catalog.jar \
+  --file launchers/standalone-federated-catalog/src/main/docker/Dockerfile \
+  --tag standalone-federated-catalog:latest launchers/standalone-federated-catalog
+sh launchers/standalone-federated-catalog/src/test/docker/entrypoint-test.sh
+central-kg/deploy.sh up central-platform-federated-catalog --detach --no-deps --force-recreate
+```
+
+In Postman, use `HOST=localhost`, `FederatedCatalogPortCatalog=8184`, and
+`POST /api/catalog/v1alpha/catalog/query` with a `QuerySpec` body. The API queries
+the crawler's cache, so `200 []` does not mean crawling succeeded. Check the
+catalog logs for failed crawls: Vault HTTP 403 indicates an invalid token, while
+DSP HTTP 401 indicates a participant authentication or credential problem.
+The mounted token is loaded at startup; recreate the catalog after rotating it.
+If the token volume is mounted but missing or empty, startup fails explicitly.
+Without that volume, the image retains the normal EDC token configuration.
+
+When providers require DataProcessor credentials for catalog requests, set
+`UNIMAAS_ENABLE_EXTRA_VP_CATALOGREQUEST=true` for the standalone catalog as well
+as the connectors (Compose already forwards this flag). This authorizes both
+Membership and DataProcessor presentation scopes. A mismatched scope causes
+`Invalid query: requested Credentials outside of scope` on the provider and an
+empty federated cache even when the assets exist.
+
+The central GraphDB service publishes host port `7200`; it cannot start if another process or container already owns that port. The federated catalog does not depend on the central GraphDB service, so start the catalog directly when GraphDB is already provided elsewhere.
 
 ## Digital thread
 
@@ -115,3 +154,5 @@ See [README](./centralKG_API/README.md).
 # stop the api
 ./deploy.sh down central-platform-kg-api 
 ```
+
+The API also accepts WP4 Infraflex monitoring batches at `POST /telemetry/events`. Configure `DMS_SPARQL_UPDATE_ADDRESS`, `DMS_TELEMETRY_API_KEY`, and `DMS_TELEMETRY_NAMESPACE` in `centralKG_API/api.env`; see the [API guide](./centralKG_API/README.md#infraflex-telemetry-ingestion) for the request format and GraphDB vocabulary setup. EDC remains the governed transport and catalog mechanism.

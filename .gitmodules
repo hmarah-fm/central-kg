@@ -1,3 +1,9 @@
 [submodule "MSC-Ontology-RDF"]
 	path = MSC-Ontology-RDF
 	url = https://github.com/UniMaaS-project-eu/MSC-Ontology-RDF.git
+[submodule "ed-node"]
+	path = ed-node
+	url = https://github.com/UniMaaS-project-eu/ed-node.git
+[submodule "federated-catalog"]
+	path = federated-catalog
+	url = https://github.com/UniMaaS-project-eu/federated-catalog.git

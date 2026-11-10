@@ -1,10 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from datetime import datetime
+from math import isfinite
+import secrets
+from typing import List, Optional
+
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import urllib.parse
 import os
 import requests
+from telemetry_rdf import observation_iri, serialize_events
 
 # Load .env file
 dotenv_file = "api.env"
@@ -13,6 +19,10 @@ load_dotenv(dotenv_file)
 SPARQL_ENDPOINT = os.getenv("DMS_SPARQL_ADDRESS")
 SPARQL_USER = os.getenv("DMS_SPARQL_USER")
 SPARQL_PASSWORD = os.getenv("DMS_SPARQL_PASSWORD")
+TELEMETRY_UPDATE_ENDPOINT = os.getenv("DMS_SPARQL_UPDATE_ADDRESS")
+TELEMETRY_NAMESPACE = os.getenv(
+    "DMS_TELEMETRY_NAMESPACE", "http://data.local/graph/infraflex"
+)
 
 app = FastAPI(
     title="Access API for the central KG",
@@ -208,6 +218,125 @@ class SPARQLQuery(BaseModel):
 def run_raw_sparql(body: SPARQLQuery):
     results = run_sparql(body.query)
     return results
+
+
+class InfraflexTelemetryEvent(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+    asset_id: str = Field(min_length=1, max_length=128)
+    source_id: str = Field(min_length=1, max_length=128)
+    metric_name: str = Field(min_length=1, max_length=128)
+    value: float
+    unit: str = Field(default="", max_length=32)
+    observed_at: datetime
+
+
+class InfraflexTelemetryBatch(BaseModel):
+    events: List[InfraflexTelemetryEvent]
+
+
+@app.post("/telemetry/events", status_code=202)
+def ingest_infraflex_telemetry(
+    body: InfraflexTelemetryBatch,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    expected_key = os.getenv("DMS_TELEMETRY_API_KEY")
+    if not expected_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Telemetry ingestion is not configured",
+        )
+    if not x_api_key or not secrets.compare_digest(
+        x_api_key.encode("utf-8"), expected_key.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not TELEMETRY_UPDATE_ENDPOINT:
+        raise HTTPException(
+            status_code=503,
+            detail="GraphDB telemetry update endpoint is not configured",
+        )
+    if not 1 <= len(body.events) <= 500:
+        raise HTTPException(
+            status_code=422,
+            detail="A batch must contain between 1 and 500 events",
+        )
+
+    records = []
+    seen_event_ids = set()
+    for event in body.events:
+        if not all(
+            value.strip()
+            for value in (
+                event.event_id,
+                event.asset_id,
+                event.source_id,
+                event.metric_name,
+            )
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Event identifiers and metric name cannot be blank",
+            )
+        if not isfinite(event.value):
+            raise HTTPException(
+                status_code=422,
+                detail="Telemetry values must be finite numbers",
+            )
+        if event.observed_at.utcoffset() is None:
+            raise HTTPException(
+                status_code=422,
+                detail="observed_at must include a timezone",
+            )
+        event_identity = (event.source_id, event.event_id)
+        if event_identity in seen_event_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="A batch cannot contain duplicate source_id/event_id pairs",
+            )
+        seen_event_ids.add(event_identity)
+
+        records.append(
+            {
+                "event_id": event.event_id,
+                "asset_id": event.asset_id,
+                "source_id": event.source_id,
+                "metric_name": event.metric_name,
+                "value": event.value,
+                "unit": event.unit,
+                "observed_at": event.observed_at.isoformat(),
+            }
+        )
+
+    try:
+        turtle = serialize_events(records, TELEMETRY_NAMESPACE)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Telemetry namespace configuration is invalid",
+        ) from error
+    try:
+        response = requests.post(
+            TELEMETRY_UPDATE_ENDPOINT,
+            data=turtle.encode("utf-8"),
+            headers={"Content-Type": "text/turtle"},
+            auth=(SPARQL_USER, SPARQL_PASSWORD)
+            if SPARQL_USER and SPARQL_PASSWORD
+            else None,
+            timeout=15,
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as error:
+        raise HTTPException(
+            status_code=502,
+            detail="GraphDB rejected the telemetry update",
+        ) from error
+
+    return {
+        "accepted": len(records),
+        "observations": [
+            observation_iri(TELEMETRY_NAMESPACE, item["source_id"], item["event_id"])
+            for item in records
+        ],
+    }
 
 #MSC Queries
 

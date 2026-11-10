@@ -302,6 +302,68 @@
         }
       }
     },
+    "/telemetry/events": {
+      "post": {
+        "summary": "Ingest Infraflex Telemetry",
+        "operationId": "ingest_infraflex_telemetry_telemetry_events_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfraflexTelemetryBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Telemetry accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "integer"
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid API key"
+          },
+          "422": {
+            "description": "Invalid telemetry batch"
+          },
+          "502": {
+            "description": "GraphDB update failed"
+          },
+          "503": {
+            "description": "Telemetry ingestion is not configured"
+          }
+        }
+      }
+    },
     "/msc/get_stage": {
       "get": {
         "summary": "Get Msc Stage",
@@ -385,6 +447,75 @@
   },
   "components": {
     "schemas": {
+      "InfraflexTelemetryBatch": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/InfraflexTelemetryEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "InfraflexTelemetryBatch"
+      },
+      "InfraflexTelemetryEvent": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Event Id"
+          },
+          "asset_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Asset Id"
+          },
+          "source_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source Id"
+          },
+          "metric_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Metric Name"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Unit",
+            "default": ""
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "asset_id",
+          "source_id",
+          "metric_name",
+          "value",
+          "observed_at"
+        ],
+        "title": "InfraflexTelemetryEvent"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {

@@ -1,0 +1,40 @@
+@prefix ifx: <http://unimaas-project.eu/InfraflexTelemetry#> .
+@prefix sc: <http://unimaas-project.eu/MSCOntology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://unimaas-project.eu/InfraflexTelemetry> a owl:Ontology ;
+    rdfs:label "UniMaaS Infraflex telemetry vocabulary" .
+
+ifx:TelemetryObservation a owl:Class ;
+    rdfs:label "Telemetry observation" ;
+    rdfs:comment "A timestamped numeric measurement reported for Infraflex equipment." .
+
+ifx:observedAsset a owl:ObjectProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range sc:EquipmentResource .
+
+ifx:observationId a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:string .
+
+ifx:sourceId a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:string .
+
+ifx:metricName a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:string .
+
+ifx:numericValue a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:decimal .
+
+ifx:unit a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:string .
+
+ifx:observedAt a owl:DatatypeProperty ;
+    rdfs:domain ifx:TelemetryObservation ;
+    rdfs:range xsd:dateTime .
