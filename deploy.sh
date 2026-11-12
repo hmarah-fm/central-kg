@@ -46,6 +46,22 @@ if [[ "$MODE" == "up" && "$SERVICE" == "central-platform-federated-catalog" ]] &
   fi
 fi
 
+if [[ "$MODE" == "up" && ( -z "$SERVICE" || "$SERVICE" == "central-platform-digital-thread" ) ]]; then
+  echo "deploy.sh: building digital-thread image from workspace source"
+  if ! (
+    cd "$PROJECT_ROOT" &&
+      ./gradlew :launchers:digital-thread:build &&
+      docker build \
+        --build-arg JAR=build/libs/digital-thread.jar \
+        --file launchers/digital-thread/src/main/docker/Dockerfile \
+        --tag digital-thread:latest \
+        launchers/digital-thread
+  ); then
+    echo "Error: Failed to build digital-thread image."
+    exit 1
+  fi
+fi
+
 COMPOSE_ARGS=("$MODE")
 if [[ -n "$SERVICE" ]]; then
   COMPOSE_ARGS+=("$SERVICE")
